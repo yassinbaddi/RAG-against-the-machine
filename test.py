@@ -1,8 +1,16 @@
 import ast
 
-source_code = "x = 5 + 10"
-tree = ast.parse(source_code)
+code = """\
+x = 10
 
+def calculate(a, b):
+    result = a + b
+    return result
+"""
 
-# print(ast.dump(tree, indent=4))
-print(ast.unparse(tree))
+tree = ast.parse(code)
+
+for node in ast.walk(tree):
+    if isinstance(node, ast.Name):
+        source = ast.get_source_segment(code, node)
+        print(source)

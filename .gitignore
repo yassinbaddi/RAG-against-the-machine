@@ -10,5 +10,13 @@ data/
 datasets_public/
 *.zip
 
-data/row/
-vllm-0.10.1
+data/
+vllm-0.10.1/
+.vscode/
+
+test_vllm/
+
+.gitignore
+copy_files.py
+full_project.py
+
