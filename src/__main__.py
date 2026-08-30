@@ -1,26 +1,29 @@
 from pathlib import Path
+
 import fire
-from indexer import build_chunks, save_chunks
+from retriever import search_bm25
+
+from indexer import build_chunks, save_bm25_index, build_bm25_index
 
 
 def index(
     max_chunk_size: int = 2000,
 ) -> None:
     root = Path("test_vllm")
+    output_path = Path("data/processed/bm25")
 
     chunks = build_chunks(
         root,
         max_chunk_size,
     )
 
-    output_path = Path(
-        "data/processed/chunks.json"
-    )
+    retriever = build_bm25_index(chunks)
 
-    # save_chunks(
-    #     chunks,
-    #     output_path,
-    # )
+    save_bm25_index(
+        retriever,
+        chunks,
+        output_path,
+    )
 
     print(f"Indexed {len(chunks)} chunks.")
     print(f"Saved to {output_path}")

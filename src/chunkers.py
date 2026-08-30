@@ -1,5 +1,4 @@
 import ast
-from operator import le
 from pathlib import Path
 from models import Chunk
 
@@ -137,3 +136,5 @@ def chunk_markdown(
             chunks.extend(split_text(file_path, section, max_chunk_size, start))
 
     return chunks
+
+
