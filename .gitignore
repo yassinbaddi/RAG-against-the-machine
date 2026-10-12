@@ -20,3 +20,13 @@ test_vllm/
 copy_files.py
 full_project.py
 
+test.py
+
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.venv/
+data/processed/
+data/output/
+*.egg-info/
