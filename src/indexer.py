@@ -1,11 +1,9 @@
 from __future__ import annotations
-
 import json
 from pathlib import Path
-
 import bm25s
 from tqdm import tqdm
-
+import types
 from .chunkers import chunk_file
 from .models import Chunk
 
@@ -26,6 +24,8 @@ def build_chunks(root: Path, max_chunk_size: int) -> list[Chunk]:
         FileNotFoundError: If ``root`` does not exist.
         NotADirectoryError: If ``root`` is not a directory.
     """
+    print(root)
+    print(type(root))
     if not root.exists():
         raise FileNotFoundError(f"Corpus directory does not exist: {root}")
     if not root.is_dir():

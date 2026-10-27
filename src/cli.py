@@ -1,7 +1,8 @@
 """Command-line interface for the RAG pipeline."""
 import json
 from pathlib import Path
-
+import types
+import uuid
 import fire
 from tqdm import tqdm
 
@@ -10,6 +11,7 @@ from src.models import (
     StudentSearchResults,
     StudentSearchResultsAndAnswer,
     RagDataset,
+    MinimalSearchResults,
 )
 from src.chunkers import chunk_file
 from src.indexer import (
@@ -31,6 +33,8 @@ from src.embeddings import embed_chunks, save_embeddings, load_embeddings
 from src.hybrid import search_hybrid
 from src.incremental import load_manifest, save_manifest, has_changed, file_hash
 from src.cache import load_cache, save_cache, cache_key
+import typing
+import uuid
 
 
 DEFAULT_INPUT_DIR = "data/raw/vllm-0.10.1"
@@ -64,6 +68,7 @@ def index(
             print(f"{len(changed_files)}/{len(all_files)} files changed, reindexing those only")
 
             chunks_path = output_path / "chunks.json"
+            chunks_path = Path(chunks_path)
             previous_chunks = json.loads(chunks_path.read_text()) if chunks_path.exists() else []
             changed_paths = {str(f) for f in changed_files}
             kept = [c for c in previous_chunks if c["file_path"] not in changed_paths]
@@ -110,8 +115,8 @@ def search(
         if k <= 0:
             print("Error: k must be a positive integer")
             return
-
-        retriever, chunks = load_bm25_index(output_directory)
+        path = Path(output_directory)
+        retriever, chunks = load_bm25_index(path)
 
         cache = load_cache(output_directory)
         key = cache_key(f"{mode}:{query}", k)
@@ -130,7 +135,16 @@ def search(
             cache[key] = sources
             save_cache(cache, output_directory)
 
-        result = StudentSearchResults(question=query, retrieved_sources=sources)
+        result = StudentSearchResults(
+            search_results=[
+                {
+                    "question_id": str(uuid.uuid4()),
+                    "question": query,
+                    "retrieved_sources": sources,
+                }
+            ],
+            k=k,
+        )
         print(result.model_dump_json(indent=2))
 
     except FileNotFoundError as exc:
@@ -147,40 +161,43 @@ def search_dataset(
     mode: str = "bm25",
 ) -> None:
     """Run search for every question in a dataset file and save results."""
-    try:
-        dataset_file = Path(dataset_path)
-        if not dataset_file.exists():
-            print(f"Error: dataset file '{dataset_path}' not found")
-            return
+    # try:
+    dataset_file = Path(dataset_path)
+    if not dataset_file.exists():
+        print(f"Error: dataset file '{dataset_path}' not found")
+        return
 
-        data = json.loads(dataset_file.read_text())
-        dataset = RagDataset(**data)
+    data = json.loads(dataset_file.read_text())
+    dataset = RagDataset(**data)
 
-        retriever, chunks = load_bm25_index(index_directory)
-        vectors = load_embeddings(index_directory) if mode == "hybrid" else None
+    retriever, chunks = load_bm25_index(index_directory)
+    vectors = load_embeddings(index_directory) if mode == "hybrid" else None
 
-        Path(save_directory).mkdir(parents=True, exist_ok=True)
+    Path(save_directory).mkdir(parents=True, exist_ok=True)
 
-        for idx, question in enumerate(tqdm(dataset.rag_questions, desc="Searching dataset")):
-            if mode == "hybrid" and vectors is not None:
-                results = search_hybrid(retriever, vectors, chunks, question.question, k=k)
-            else:
-                results = search_bm25(retriever, question.question, chunks, k=k)
+    for idx, question in enumerate(tqdm(dataset.rag_questions, desc="Searching dataset")):
+        if mode == "hybrid" and vectors is not None:
+            results = search_hybrid(retriever, vectors, chunks, question.question, k=k)
+        else:
+            results = search_bm25(retriever, question.question, chunks, k=k)
 
-            sources = chunks_to_sources(results)
-            result = StudentSearchResults(question=question.question, retrieved_sources=sources)
+        sources = chunks_to_sources(results)
 
-            out_file = Path(save_directory) / f"question_{idx}.json"
-            out_file.write_text(result.model_dump_json(indent=2))
+        result = StudentSearchResults(search_results=
+            [MinimalSearchResults(question_id=str(uuid.uuid4()),
+            question=question.question, retrieved_sources=sources)], k=k)
 
-        print(f"Saved {len(dataset.rag_questions)} search results to '{save_directory}'")
+        out_file = Path(save_directory) / f"question_{idx}.json"
+        out_file.write_text(result.model_dump_json(indent=2))
 
-    except json.JSONDecodeError as exc:
-        print(f"Error: invalid JSON in dataset file: {exc}")
-    except FileNotFoundError as exc:
-        print(f"Error: {exc}")
-    except Exception as exc:
-        print(f"search_dataset failed: {exc}")
+    print(f"Saved {len(dataset.rag_questions)} search results to '{save_directory}'")
+
+    # except json.JSONDecodeError as exc:
+    #     print(f"Error: invalid JSON in dataset file: {exc}")
+    # except FileNotFoundError as exc:
+    #     print(f"Error: {exc}")
+    # except Exception as exc:
+    #     print(f"search_dataset failed: {exc}")
 
 
 def answer(
@@ -228,45 +245,53 @@ def answer_dataset(
     index_directory: str = DEFAULT_INDEX_DIR,
 ) -> None:
     """Generate answers for previously computed search results."""
-    try:
-        results_dir = Path(student_search_results_path)
-        if not results_dir.exists():
-            print(f"Error: '{student_search_results_path}' not found")
-            return
+    # try:
+    results_dir = Path(student_search_results_path)
+    if not results_dir.exists():
+        print(f"Error: '{student_search_results_path}' not found")
+        return
 
-        _, chunks = load_bm25_index(index_directory)
-        lookup = build_chunk_lookup(chunks)
+    _, chunks = load_bm25_index(index_directory)
+    lookup = build_chunk_lookup(chunks)
 
-        Path(save_directory).mkdir(parents=True, exist_ok=True)
+    Path(save_directory).mkdir(parents=True, exist_ok=True)
 
-        result_files = list(results_dir.glob("*.json"))
-        for file in tqdm(result_files, desc="Generating answers"):
-            data = json.loads(file.read_text())
-            search_result = StudentSearchResults(**data)
+    result_files = list(results_dir.glob("*.json"))
+    for file in tqdm(result_files, desc="Generating answers"):
+        data = json.loads(file.read_text())
+        search_result = StudentSearchResults(**data)
 
-            matched_chunks = []
-            for source in search_result.retrieved_sources:
-                chunk = find_matching_chunk(lookup, source)
-                if chunk is not None:
-                    matched_chunks.append(chunk)
+        matched_chunks = []
+        for source in search_result.retrieved_sources:
+            chunk = find_matching_chunk(lookup, source)
+            if chunk is not None:
+                matched_chunks.append(chunk)
 
-            answer_text = generate_answer(search_result.question, matched_chunks)
+        answer_text = generate_answer(search_result.question, matched_chunks)
 
-            output = StudentSearchResultsAndAnswer(
-                question=search_result.question,
-                retrieved_sources=search_result.retrieved_sources,
-                answer=answer_text,
-            )
-            (Path(save_directory) / file.name).write_text(output.model_dump_json(indent=2))
+# class MinimalAnswer(MinimalSearchResults):
+#     answer: str
 
-        print(f"Saved {len(result_files)} answers to '{save_directory}'")
+# class StudentSearchResults(BaseModel):
+#     search_results: List[MinimalSearchResults]
+#     k: int
 
-    except json.JSONDecodeError as exc:
-        print(f"Error: invalid JSON: {exc}")
-    except FileNotFoundError as exc:
-        print(f"Error: {exc}")
-    except Exception as exc:
-        print(f"answer_dataset failed: {exc}")
+# class StudentSearchResultsAndAnswer(BaseModel):
+#     search_results: List[MinimalAnswer]
+#     k: int
+        output = StudentSearchResultsAndAnswer(
+            search_results=[MinimalAnswer(answer=answer_text)], k=k
+        )
+        (Path(save_directory) / file.name).write_text(output.model_dump_json(indent=2))
+
+    print(f"Saved {len(result_files)} answers to '{save_directory}'")
+
+    # except json.JSONDecodeError as exc:
+    #     print(f"Error: invalid JSON: {exc}")
+    # except FileNotFoundError as exc:
+    #     print(f"Error: {exc}")
+    # except Exception as exc:
+    #     print(f"answer_dataset failed: {exc}")
 
 
 def evaluate(student_search_results_path: str, dataset_path: str) -> None:

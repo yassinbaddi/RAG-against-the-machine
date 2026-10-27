@@ -14,3 +14,4 @@ __pycache__/
 .venv/
 data/processed/bm25
 data/raw/vllm-0.10.1/vllm/model_executor/models/registry.py
+data/output/search_results

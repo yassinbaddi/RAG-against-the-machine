@@ -8,12 +8,13 @@ import bm25s
 from .models import Chunk, MinimalSource
 
 
-def load_bm25_index(index_path: Path) -> tuple[bm25s.BM25, list[Chunk]]:
+def load_bm25_index(index_path: str) -> tuple[bm25s.BM25, list[Chunk]]:
     """Load a persisted BM25 index and its chunks.
 
     Raises:
         FileNotFoundError: If the index directory does not exist.
     """
+    index_path = Path(index_path)
     if not index_path.exists():
         raise FileNotFoundError(f"Index does not exist: {index_path}")
 
