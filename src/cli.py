@@ -82,7 +82,7 @@ def index(
             chunks = build_chunks(root, max_chunk_size)
 
         retriever = build_bm25_index(chunks)
-        save_bm25_index(retriever, chunks, output_directory, max_chunk_size)
+        save_bm25_index(retriever, chunks, output_path, max_chunk_size)
 
         if with_embeddings:
             vectors = embed_chunks(chunks)
