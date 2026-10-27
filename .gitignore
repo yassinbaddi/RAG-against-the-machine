@@ -1,27 +1,14 @@
 
 
-.venv
 
-__pycache__/
-*.pyc
-.venv/
 .env
 *.zip
-
-vllm-0.10.1/
 .vscode/
-
 test_vllm/
-
 .gitignore
-copy_files.py
-full_project.py
-
 test.py
-
 __pycache__/
 *.pyc
 .mypy_cache/
 .pytest_cache/
 .venv/
-*.egg-info/
