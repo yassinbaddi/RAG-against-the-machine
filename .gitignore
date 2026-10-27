@@ -6,11 +6,8 @@ __pycache__/
 *.pyc
 .venv/
 .env
-data/
-datasets_public/
 *.zip
 
-data/
 vllm-0.10.1/
 .vscode/
 
@@ -27,6 +24,4 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .venv/
-data/processed/
-data/output/
 *.egg-info/
