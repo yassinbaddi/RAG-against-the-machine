@@ -12,6 +12,7 @@ from src.models import (
     StudentSearchResultsAndAnswer,
     RagDataset,
     MinimalSearchResults,
+    MinimalAnswer,
 )
 from src.chunkers import chunk_file
 from src.indexer import (
@@ -175,22 +176,26 @@ def search_dataset(
 
     Path(save_directory).mkdir(parents=True, exist_ok=True)
 
-    for idx, question in enumerate(tqdm(dataset.rag_questions, desc="Searching dataset")):
+    search_results = []
+    for question in tqdm(dataset.rag_questions, desc="Searching dataset"):
         if mode == "hybrid" and vectors is not None:
             results = search_hybrid(retriever, vectors, chunks, question.question, k=k)
         else:
             results = search_bm25(retriever, question.question, chunks, k=k)
 
         sources = chunks_to_sources(results)
+        search_results.append(
+            MinimalSearchResults(
+                question_id=question.question_id,
+                question=question.question,
+                retrieved_sources=sources,
+            )
+        )
 
-        result = StudentSearchResults(search_results=
-            [MinimalSearchResults(question_id=str(uuid.uuid4()),
-            question=question.question, retrieved_sources=sources)], k=k)
-
-        out_file = Path(save_directory) / f"question_{idx}.json"
-        out_file.write_text(result.model_dump_json(indent=2))
-
-    print(f"Saved {len(dataset.rag_questions)} search results to '{save_directory}'")
+    output = StudentSearchResults(search_results=search_results, k=k)
+    output_file = Path(save_directory) / dataset_file.name
+    output_file.write_text(output.model_dump_json(indent=2))
+    print(f"Saved student_search_results to '{output_file}'")
 
     # except json.JSONDecodeError as exc:
     #     print(f"Error: invalid JSON in dataset file: {exc}")
@@ -227,9 +232,15 @@ def answer(
         sources = chunks_to_sources(results)
 
         result = StudentSearchResultsAndAnswer(
-            question=query,
-            retrieved_sources=sources,
-            answer=answer_text,
+            search_results=[
+                MinimalAnswer(
+                    question_id=str(uuid.uuid4()),
+                    question=query,
+                    retrieved_sources=sources,
+                    answer=answer_text,
+                )
+            ],
+            k=k,
         )
         print(result.model_dump_json(indent=2))
 
@@ -246,41 +257,46 @@ def answer_dataset(
 ) -> None:
     """Generate answers for previously computed search results."""
     # try:
-    results_dir = Path(student_search_results_path)
-    if not results_dir.exists():
+    results_path = Path(student_search_results_path)
+    if not results_path.exists():
         print(f"Error: '{student_search_results_path}' not found")
+        return
+    if results_path.is_file():
+        result_files = [results_path]
+    elif results_path.is_dir():
+        result_files = sorted(results_path.glob("*.json"))
+    else:
+        print(f"Error: '{student_search_results_path}' is not a file or directory")
         return
 
     _, chunks = load_bm25_index(index_directory)
     lookup = build_chunk_lookup(chunks)
 
     Path(save_directory).mkdir(parents=True, exist_ok=True)
-
-    result_files = list(results_dir.glob("*.json"))
     for file in tqdm(result_files, desc="Generating answers"):
         data = json.loads(file.read_text())
         search_result = StudentSearchResults(**data)
 
-        matched_chunks = []
-        for source in search_result.retrieved_sources:
-            chunk = find_matching_chunk(lookup, source)
-            if chunk is not None:
-                matched_chunks.append(chunk)
+        answered_results = []
+        for item in search_result.search_results:
+            matched_chunks = []
+            for source in item.retrieved_sources:
+                chunk = find_matching_chunk(lookup, source)
+                if chunk is not None:
+                    matched_chunks.append(chunk)
 
-        answer_text = generate_answer(search_result.question, matched_chunks)
+            answer_text = generate_answer(item.question, matched_chunks)
+            answered_results.append(
+                MinimalAnswer(
+                    question_id=item.question_id,
+                    question=item.question,
+                    retrieved_sources=item.retrieved_sources,
+                    answer=answer_text,
+                )
+            )
 
-# class MinimalAnswer(MinimalSearchResults):
-#     answer: str
-
-# class StudentSearchResults(BaseModel):
-#     search_results: List[MinimalSearchResults]
-#     k: int
-
-# class StudentSearchResultsAndAnswer(BaseModel):
-#     search_results: List[MinimalAnswer]
-#     k: int
         output = StudentSearchResultsAndAnswer(
-            search_results=[MinimalAnswer(answer=answer_text)], k=k
+            search_results=answered_results, k=search_result.k
         )
         (Path(save_directory) / file.name).write_text(output.model_dump_json(indent=2))
 
