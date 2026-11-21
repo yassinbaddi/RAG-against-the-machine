@@ -22,6 +22,8 @@ from retriever import (
     load_bm25_index,
     search_bm25,
 )
+from models import Chunk
+from retriever import chunks_to_sources
 
 
 def index(
@@ -74,12 +76,12 @@ def search(
         retriever, chunks = load_bm25_index(Path(output_directory))
         result = search_bm25(retriever, query, chunks, k)
         sources = [
-        MinimalSource(
-            file_path=chunk.file_path,
-            first_character_index=chunk.first_character_index,
-            last_character_index=chunk.last_character_index,
-        )
-        for chunk in result
+            MinimalSource(
+                file_path=chunk.file_path,
+                first_character_index=chunk.first_character_index,
+                last_character_index=chunk.last_character_index,
+            )
+            for chunk in result
         ]
 
         search_result = MinimalSearchResults(
@@ -89,7 +91,7 @@ def search(
         )
         student_results = StudentSearchResults(
             search_results=[search_result], k=k
-            )
+        )
         print(student_results.model_dump_json(indent=4))
 
     except Exception as exc:
@@ -122,11 +124,12 @@ def search_dataset(
         search_results = []
         for item in tqdm(
             data.get("rag_questions", []), desc="Searching dataset"
-                ):
+        ):
             question_id = item.get("question_id", str(uuid.uuid4()))
             question = item["question"]
 
             result = search_bm25(retriever, question, chunks, k)
+
             search_results.append(
                 MinimalSearchResults(
                     question_id=question_id,
@@ -137,7 +140,7 @@ def search_dataset(
 
         student_results = StudentSearchResults(
             search_results=search_results, k=k
-            )
+        )
 
         output_dir = Path(save_directory)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -148,11 +151,7 @@ def search_dataset(
 
         print(f"Saved student_search_results to {output_file}")
 
-    except json.JSONDecodeError as exc:
-        print(f"Error: malformed JSON dataset: {exc}")
-    except (FileNotFoundError, KeyError, ValueError) as exc:
-        print(f"Error: {exc}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Search dataset failed: {exc}")
 
 
@@ -223,7 +222,7 @@ def answer_dataset(
 
             generated_answer = generate_answer(
                 question["question"], context_chunks
-                )
+            )
 
             answers.append(
                 MinimalAnswer(

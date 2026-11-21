@@ -51,3 +51,10 @@ def find_matching_chunk(
     """Find the chunk corresponding to a source location, if indexed."""
     key = (source.file_path, source.first_character_index, source.last_character_index)
     return lookup.get(key)
+
+def chunks_to_sources(result: list[Chunk]):
+    return [MinimalSource(
+        file_path=chunk.file_path,
+        first_character_index=chunk.first_character_index,
+        last_character_index=chunk.last_character_index
+    ) for chunk in result]

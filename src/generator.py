@@ -73,7 +73,7 @@ def generate_text(prompt: str, max_new_tokens: int = 256) -> str:
 
 
 def generate_answer(query: str, chunks: list[Chunk]) -> str:
-    """Generate a grounded answer to a query from retrieved context chunks."""
+    """Generate an answer to a query from retrieved context chunks."""
     context = build_context(chunks)
     prompt = build_prompt(query, context)
     return generate_text(prompt)
