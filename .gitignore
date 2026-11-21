@@ -30,3 +30,4 @@ __pycache__/
 data/processed/
 data/output/
 *.egg-info/
+*.test

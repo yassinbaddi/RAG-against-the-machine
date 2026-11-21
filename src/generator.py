@@ -1,13 +1,8 @@
-"""Answer generation using a small local causal language model (Qwen3-0.6B)."""
-
 from __future__ import annotations
-
 import textwrap
 from typing import Any
-
 from transformers import AutoModelForCausalLM, AutoTokenizer
-
-from .models import Chunk
+from models import Chunk
 
 MODEL_NAME = "Qwen/Qwen3-0.6B"
 

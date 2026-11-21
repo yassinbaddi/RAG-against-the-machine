@@ -1,0 +1,323 @@
+RAG against the machine
+Chapter VI - Mandatory part
+
+You will build a Retrieval-Augmented Generation system that answers questions
+about a codebase. You ingest the provided vLLM repository into a searchable index,
+retrieve the most relevant snippets for a question, generate an answer from them with
+Qwen/Qwen3-0.6B, and measure retrieval quality with recall@k. Your system is judged on
+whether it retrieves the right source locations and produces answers grounded in them.
+
+VI.1 Indexing the codebase
+Everything starts with the index. Read the files you judge useful from the vLLM repository shipped in the attachments, split each one into chunks, and persist an index that
+retrieval can query in milliseconds. Indexing the whole corpus must take at most 5 minutes.
+
+A Python file and a Markdown page do not break apart the same way, so your program
+must implement two distinct chunking strategies:
+- Python code chunking,
+- Markdown / text chunking.
+
+For retrieval itself, implement at least one of the two classic lexical methods. The choice is yours:
+- TF-IDF,
+- BM25.
+
+You may explore other methods on top, as long as one of these two is implemented.
+
+NOTE: Chunk size is configurable through a CLI argument (--max_chunk_size), with a
+default of 2000 characters. Do not go above it: the moulinette rejects any retrieved
+source longer than 2000 characters (its max_context_length), and a single over-long
+source makes your whole output invalid. Smaller chunks are fine; report the effect on
+your recall@k.
+
+Example terminal (indexing):
+$ uv run python -m src index --max_chunk_size 2000
+Chunking: 100%|##########| 1965/1965 [00:00<00:00, 16710 file/s]
+Tokenizing: 100%|##########| 13466/13466 [00:01<00:00, 10668 chunk/s]
+Ingestion complete! Indexed 13466 chunks under data/processed/
+
+TIP: Questions and source code rarely use the same words: a question may paraphrase
+an idea or quote an identifier verbatim. What you keep at indexing time decides which
+of the two you can still match.
+
+VI.2 Retrieval
+With the index built, you can search it. Given a question, your system returns the
+top-k most relevant snippets. Each result is a source location: a file_path and the
+character range (first_character_index, last_character_index) it covers, at most
+2000 characters wide.
+
+WARNING: file_path must match the corpus path exactly (e.g.
+data/raw/vllm-0.10.1/docs/features/lora.md). The grader compares
+paths verbatim, so a path with a different prefix never matches.
+
+Retrieval must work for a single query and in batch over a whole dataset of questions read
+from JSON. On the reference datasets, your system must reach at least 80% recall@5 on
+docs questions and 50% on code questions (the metric is defined in the Evaluation chapter).
+
+Example terminal (search):
+$ uv run python -m src search "How to configure the OpenAI server?" --k 5
+data/raw/vllm-0.10.1/examples/online_serving/openai_transcription_client.py [0:1352]
+data/raw/vllm-0.10.1/examples/online_serving/prompt_embed_inference_with_openai_client.py [0:932]
+data/raw/vllm-0.10.1/docs/deployment/frameworks/dstack.md [1936:3170]
+data/raw/vllm-0.10.1/docs/models/supported_models.md [1699:3396]
+data/raw/vllm-0.10.1/examples/online_serving/openai_chat_completion_client_with_tools.py [0:2000]
+
+VI.3 Answer generation
+With the right snippets retrieved, the system generates a natural-language answer using
+Qwen/Qwen3-0.6B. Pass the retrieved context to the model within its token budget, and
+produce structured JSON following the provided pydantic models.
+
+A satisfactory answer is:
+- Coherent and understandable,
+- Grounded in the retrieved sources, with no major hallucination,
+- On point: it answers the question actually asked.
+
+NOTE: The mandatory Qwen/Qwen3-0.6B model has known reasoning limits. These
+criteria describe the target an answer should aim for, not a strict pass/fail bar: grading
+prioritizes retrieval quality, grounding and prompt strategy over perfect final phrasing.
+A valid answer is coherent and mostly grounded in the retrieved documents, even if
+partially incomplete due to base-model limitations.
+
+VI.4 Data Models
+Implement the following pydantic models; they validate the data exchanged between the
+stages. The MinimalSource model represents a single source of information:
+
+class MinimalSource(BaseModel):
+    file_path: str
+    first_character_index: int
+    last_character_index: int
+
+The UnansweredQuestion and AnsweredQuestion models represent an unanswered
+question and an answered question:
+
+class UnansweredQuestion(BaseModel):
+    question_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    question: str
+
+class AnsweredQuestion(UnansweredQuestion):
+    sources: List[MinimalSource]
+    answer: str
+
+The RagDataset model represents a dataset of RAG questions:
+
+class RagDataset(BaseModel):
+    rag_questions: List[AnsweredQuestion | UnansweredQuestion]
+
+The MinimalSearchResults and MinimalAnswer models represent the search results
+and an answer:
+
+class MinimalSearchResults(BaseModel):
+    question_id: str
+    question: str
+    retrieved_sources: List[MinimalSource]
+
+class MinimalAnswer(MinimalSearchResults):
+    answer: str
+
+The StudentSearchResults and StudentSearchResultsAndAnswer models represent search results and search results with answers:
+
+class StudentSearchResults(BaseModel):
+    search_results: List[MinimalSearchResults]
+    k: int
+
+class StudentSearchResultsAndAnswer(BaseModel):
+    search_results: List[MinimalAnswer]
+    k: int
+
+The provided models are a foundation. You can expand them by adding new models
+or extra fields (for example in the search results model) if your implementation requires it.
+
+VI.5 Output
+Each command writes a JSON file that conforms to the provided pydantic models:
+- For search operations: Use StudentSearchResults model with:
+  - search_results: List of MinimalSearchResults containing question_id, question and retrieved_sources
+  - k: Number of results requested
+- For answer generation: Use StudentSearchResultsAndAnswer model with:
+  - search_results: List of MinimalAnswer containing question_id, question, retrieved_sources, and answer
+  - k: Number of results requested
+- Source information: Each MinimalSource contains:
+  - file_path: path to the source file, relative to your project root and written exactly as in the ingested corpus (e.g. data/raw/vllm-0.10.1/...); it is compared verbatim to the reference
+  - first_character_index: Starting character position
+  - last_character_index: Ending character position
+
+Output Format
+The output must respect the minimal basis of the provided models but can be enhanced as follows:
+
+Example: StudentSearchResults Output
+{
+"search_results": [
+  {
+    "question_id": "q1",
+    "question": "How to configure OpenAI server?",
+    "retrieved_sources": [
+      {
+        "file_path": "data/raw/vllm-0.10.1/docs/serving/openai_compatible_server.md",
+        "first_character_index": 9867,
+        "last_character_index": 10100
+      },
+      {
+        "file_path": "data/raw/vllm-0.10.1/vllm/entrypoints/openai/api_server.py",
+        "first_character_index": 267,
+        "last_character_index": 400
+      }
+    ]
+  }
+],
+"k": 10
+}
+
+Example: StudentSearchResultsAndAnswer Output
+{
+"search_results": [
+  {
+    "question_id": "q1",
+    "question": "How to configure OpenAI server?",
+    "retrieved_sources": [
+      {
+        "file_path": "data/raw/vllm-0.10.1/docs/serving/openai_compatible_server.md",
+        "first_character_index": 9867,
+        "last_character_index": 10100
+      },
+      {
+        "file_path": "data/raw/vllm-0.10.1/vllm/entrypoints/openai/api_server.py",
+        "first_character_index": 267,
+        "last_character_index": 400
+      }
+    ],
+    "answer": "To configure the OpenAI compatible server in vLLM..."
+  }
+],
+"k": 10
+}
+
+VI.6 Command-Line Interface
+Provide a CLI built with Python Fire. Every command is invoked as `uv run python
+-m src <command> [options]`. The following commands are required (options shown
+are the minimum; you may add your own):
+
+- index --max_chunk_size <int>
+  Ingest data/raw/ and build the index under data/processed/.
+- search <query> --k <int>
+  Return the top-k sources for a single query.
+- search_dataset --dataset_path <path> --k <int> --save_directory <dir>
+  Run search over a whole dataset and write a StudentSearchResults JSON file.
+- answer <query> --k <int>
+  Answer a single query using the retrieved context.
+- answer_dataset --student_search_results_path <path> --save_directory <dir>
+  Generate answers for a dataset, producing a StudentSearchResultsAndAnswer JSON file.
+- evaluate --student_search_results_path <path> --dataset_path <path>
+  Report your own recall@k against a ground-truth dataset, for your own testing.
+
+All input and output paths must be configurable CLI arguments and never hard-coded.
+Include progress bars (tqdm) for long-running operations, and handle degenerate inputs
+(empty query, nonsensical query, k=0, missing files, malformed JSON) gracefully. The
+CLI is tested with such edge cases and must never crash with an unhandled traceback.
+
+NOTE: The evaluate command is for your own iteration. The official recall@k used
+during the defense is computed by the provided moulinette executable, not by your
+code. Your solution must never import or call the moulinette.
+
+VI.7 End-to-end walkthrough
+This section shows the complete workflow, from raw documents to evaluation and answer
+generation, exactly as the reference exam scripts run it.
+
+VI.7.1 Expected project layout for evaluation
+During the defense, the retrieval pipeline is run end-to-end as a single automated flow
+(index -> search_dataset -> moulinette evaluate_student_search_results) using
+reference exam scripts. The individual commands remain available for debugging, but
+to make the automated run reproducible without manual restructuring, your repository
+must respect the following layout and conventions:
+
+- src/: your Python module, runnable as `uv run python -m src <command>`.
+- pyproject.toml and uv.lock at the repository root, so `uv sync` works from the root.
+- README.md at the repository root.
+- data/raw/: the indexed sources (the provided vLLM repository).
+- data/processed/: the index produced by the index command.
+- data/datasets/UnansweredQuestions/ and data/datasets/AnsweredQuestions/: the question datasets.
+- data/output/search_results/<DatasetScope>/: the output of search_dataset, scoped by dataset.
+- data/output/search_results_and_answer/<DatasetScope>/: the output of answer_dataset, scoped by dataset.
+
+All input and output paths (--dataset_path, --save_directory, --student_search_results_path)
+must be configurable CLI arguments and must never be hard-coded: the evaluator points
+them at the datasets and at dedicated output directories. If the structure or the command
+interface is not respected, the reference scripts cannot run and the corresponding checks
+are considered failed by design.
+
+VI.7.2 Running the full pipeline
+The pipeline is driven by four commands, in order: index the corpus, search a whole
+dataset, score the results with the moulinette, then generate answers. The search and
+answer single-query commands shown earlier behave the same way on one question at a time.
+
+1. Index the corpus once:
+$ uv run python -m src index --max_chunk_size 2000
+Ingestion complete! Indices saved under data/processed/
+
+2. Search a dataset. Always scope --save_directory by dataset (UnansweredQuestions
+or AnsweredQuestions): the public datasets share file names, so writing every run into
+the same folder would overwrite previous results.
+
+$ uv run python -m src search_dataset \
+  --dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json \
+  --k 10 \
+  --save_directory data/output/search_results/UnansweredQuestions
+Saved student_search_results to data/output/search_results/UnansweredQuestions/dataset_docs_public.json
+
+3. Score with the moulinette (rename moulinette-ubuntu/-fedora to moulinette first).
+The student results come first, the ground-truth AnsweredQuestions dataset second:
+
+$ ./moulinette evaluate_student_search_results \
+  data/output/search_results/UnansweredQuestions/dataset_docs_public.json \
+  data/datasets/AnsweredQuestions/dataset_docs_public.json \
+  --k 10 --max_context_length 2000
+
+Student data is valid: True
+Evaluation Results
+========================================
+Recall@1: 0.450 Recall@3: 0.590 Recall@5: 0.650 Recall@10: 0.720
+
+NOTE: These figures illustrate the output format only. They are not a reference score.
+The thresholds you must reach are defined in the Evaluation chapter.
+
+4. Generate answers from the search results:
+$ uv run python -m src answer_dataset \
+  --student_search_results_path data/output/search_results/UnansweredQuestions/dataset_docs_public.json \
+  --save_directory data/output/search_results_and_answer/UnansweredQuestions
+Loaded 100 questions ... Processed 100 of 100 questions
+Saved student_search_results_and_answer to .../UnansweredQuestions/dataset_docs_public.json
+
+Chapter VII - Evaluation
+
+VII.1 Evaluation metrics
+Retrieval quality is measured with a recall@k metric.
+
+VII.1.1 Recall@k Calculation
+For each question, recall@k is the share of its correct sources that you retrieve in your
+top-k results. A correct source counts as found when one of your results is in the same
+file and overlaps its character range.
+
+The overlap bar is low (an IoU of 0.05), so you do not need to match the reference span
+exactly: retrieving a chunk that covers the right region of the right file is enough. A
+result in a different file never counts, which is why file_path must be exact.
+
+Example terminal (evaluation):
+$ ./moulinette evaluate_student_search_results \
+  search_results/dataset_docs_public.json \
+  datasets/AnsweredQuestions/dataset_docs_public.json --k 10
+Student data is valid: True
+Total number of questions: 100
+Total number of questions with student sources: 100
+
+Evaluation Results
+========================================
+Questions evaluated: 100
+Recall@1: 0.620 (62.0%)
+Recall@3: 0.770 (77.0%)
+Recall@5: 0.880 (88.0%)   <- docs threshold is 80%
+Recall@10: 0.890 (89.0%)
+
+The moulinette validates your output, then reports recall at several values of k. Docs
+must reach 80% recall@5, code 50%.
+
+VII.1.2 Performances
+Your system must respect some minimal performances, listed below:
+- Indexing time: at most 5 minutes for the whole corpus.
+- Retrieval throughput: at most 90 seconds for 200 questions.
+- Recall@5: at least 80% on docs questions and 50% on code questions.

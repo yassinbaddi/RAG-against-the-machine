@@ -238,7 +238,7 @@
 #     max_chunk_size: int,
 # ) -> list[Chunk]:
 
-#     content = file_path.read_text(encoding="utf-8")
+#     content = file_path.read_text()
 
 #     if not content:
 #         return []
@@ -267,16 +267,14 @@
 
 
 from __future__ import annotations
-
 import ast
 from pathlib import Path
-
 from langchain_text_splitters import (
     PythonCodeTextSplitter,
     RecursiveCharacterTextSplitter,
 )
-
-from .models import Chunk
+from models import Chunk
+import typing
 
 
 def split_text(
@@ -285,13 +283,7 @@ def split_text(
     max_chunk_size: int,
     start_offset: int = 0,
 ) -> list[Chunk]:
-    """Naively split text into fixed-size, non-overlapping windows.
-
-    Used both as a fallback (unparsable Python, generic files) and as a
-    safety net to clip any chunk that exceeds ``max_chunk_size``.
-    """
-    if max_chunk_size <= 0:
-        raise ValueError("max_chunk_size must be greater than 0")
+    """split text into fixed-size, non-overlapping windows"""
 
     chunks: list[Chunk] = []
     for start in range(0, len(content), max_chunk_size):
@@ -307,41 +299,37 @@ def split_text(
     return chunks
 
 
-def _enforce_max_size(chunks: list[Chunk], max_chunk_size: int) -> list[Chunk]:
-    """Guarantee that no chunk exceeds max_chunk_size.
-
-    langchain splitters only guarantee a *soft* limit: an atomic unit
-    (one long line, one long paragraph) can still come out oversized.
-    The grader rejects any source longer than max_context_length, so we
-    re-split anything that slipped through.
-    """
-    enforced: list[Chunk] = []
-    for chunk in chunks:
-        if len(chunk.content) <= max_chunk_size:
-            enforced.append(chunk)
-            continue
-        enforced.extend(
-            split_text(
-                chunk.file_path,
-                chunk.content,
-                max_chunk_size,
-                start_offset=chunk.first_character_index,
-            )
-        )
-    return enforced
+# def _enforce_max_size(chunks: list[Chunk], max_chunk_size: int) -> list[Chunk]:
+#     """Guarantee that no chunk exceeds max_chunk_size"""
+#     enforced: list[Chunk] = []
+#     for chunk in chunks:
+#         if len(chunk.content) <= max_chunk_size:
+#             enforced.append(chunk)
+#             continue
+#         enforced.extend(
+#             split_text(
+#                 chunk.file_path,
+#                 chunk.content,
+#                 max_chunk_size,
+#                 start_offset=chunk.first_character_index,
+#             )
+#         )
+#     return enforced
 
 
-def chunk_python(file_path: str, content: str, max_chunk_size: int) -> list[Chunk]:
+def chunk_python(
+        file_path: str,
+        content: str,
+        max_chunk_size: int
+        ) -> list[Chunk]:
     """Split Python source code along syntactic boundaries."""
     if max_chunk_size <= 0:
         raise ValueError("max_chunk_size must be greater than 0")
-    if not content:
-        return []
 
-    try:
-        ast.parse(content)
-    except SyntaxError:
-        return split_text(file_path, content, max_chunk_size)
+    # try:
+    #     ast.parse(content)
+    # except SyntaxError:
+    #     return split_text(file_path, content, max_chunk_size)
 
     splitter = PythonCodeTextSplitter(
         chunk_size=max_chunk_size,
@@ -359,11 +347,16 @@ def chunk_python(file_path: str, content: str, max_chunk_size: int) -> list[Chun
         )
         for doc in documents
     ]
-    return _enforce_max_size(chunks, max_chunk_size)
+    # return _enforce_max_size(chunks, max_chunk_size)
+    return chunks
 
 
-def chunk_markdown(file_path: str, content: str, max_chunk_size: int) -> list[Chunk]:
-    """Split Markdown/text content along heading and paragraph boundaries."""
+def chunk_markdown(
+        file_path: str,
+        content: str,
+        max_chunk_size: int
+        ) -> list[Chunk]:
+    """Split Markdown/text content along heading and paragraph boundaries"""
     if max_chunk_size <= 0:
         raise ValueError("max_chunk_size must be greater than 0")
     if not content:
@@ -386,12 +379,13 @@ def chunk_markdown(file_path: str, content: str, max_chunk_size: int) -> list[Ch
         )
         for doc in documents
     ]
-    return _enforce_max_size(chunks, max_chunk_size)
+    # return _enforce_max_size(chunks, max_chunk_size)
+    return chunks
 
 
 def chunk_file(file_path: Path, max_chunk_size: int) -> list[Chunk]:
-    """Dispatch chunking strategy based on file extension."""
-    content = file_path.read_text(encoding="utf-8")
+    """Dispatch chunking strategy based on file extension"""
+    content = file_path.read_text()
     if not content:
         return []
 

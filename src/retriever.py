@@ -1,30 +1,22 @@
 from __future__ import annotations
-
 import json
 from pathlib import Path
-
 import bm25s
-
-from .models import Chunk, MinimalSource
+from models import Chunk, MinimalSource
 
 
 def load_bm25_index(index_path: Path) -> tuple[bm25s.BM25, list[Chunk]]:
-    """Load a persisted BM25 index and its chunks.
-
-    Raises:
-        FileNotFoundError: If the index directory does not exist.
-    """
+    """Load BM25 index and its chunks"""
     if not index_path.exists():
         raise FileNotFoundError(f"Index does not exist: {index_path}")
 
     retriever = bm25s.BM25.load(str(index_path), load_corpus=False)
 
-    with (index_path / "chunks.json").open("r", encoding="utf-8") as file:
+    with (index_path / "chunks.json").open("r") as file:
         data = json.load(file)
 
-    chunks = [Chunk.model_validate(item) for item in data]
+    chunks = [Chunk(**item) for item in data]
     return retriever, chunks
-
 
 def search_bm25(
     retriever: bm25s.BM25,
@@ -40,22 +32,9 @@ def search_bm25(
     k = min(k, len(chunks))
     query_tokens = bm25s.tokenize(query, stopwords="en")
     results, _scores = retriever.retrieve(query_tokens, k=k)
-    indices = results[0]
+    results = results[0]
 
-    return [chunks[int(i)] for i in indices if 0 <= int(i) < len(chunks)]
-
-
-def chunks_to_sources(chunks: list[Chunk]) -> list[MinimalSource]:
-    """Convert chunks into their minimal source location representation."""
-    return [
-        MinimalSource(
-            file_path=chunk.file_path,
-            first_character_index=chunk.first_character_index,
-            last_character_index=chunk.last_character_index,
-        )
-        for chunk in chunks
-    ]
-
+    return [chunks[int(i)] for i in results]
 
 def build_chunk_lookup(chunks: list[Chunk]) -> dict[tuple[str, int, int], Chunk]:
     """Index chunks by (file_path, start, end) for O(1) source lookups."""

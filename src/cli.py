@@ -1,27 +1,23 @@
 """Command-line interface for the RAG pipeline (Python Fire)."""
 
 from __future__ import annotations
-
 import json
 import uuid
 from pathlib import Path
-
 import fire
 from tqdm import tqdm
-
-from .evaluator import evaluate as compute_recall
-from .generator import generate_answer
-from .indexer import build_bm25_index, build_chunks, save_bm25_index
-from .models import (
+from evaluator import evaluate as compute_recall
+from generator import generate_answer
+from indexer import build_bm25_index, build_chunks, save_bm25_index
+from models import (
     MinimalAnswer,
     MinimalSearchResults,
     MinimalSource,
     StudentSearchResults,
     StudentSearchResultsAndAnswer,
 )
-from .retriever import (
+from retriever import (
     build_chunk_lookup,
-    chunks_to_sources,
     find_matching_chunk,
     load_bm25_index,
     search_bm25,
@@ -56,10 +52,8 @@ def index(
         print(f"Ingestion complete! Indexed {len(chunks)} chunks.")
         print(f"Indices saved under {output_path}/")
 
-    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
-        print(f"Error: {exc}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"Indexing failed: {exc}")
+    except Exception as err:
+        print(f"Indexing failed: {err}")
 
 
 def search(
@@ -79,29 +73,37 @@ def search(
 
         retriever, chunks = load_bm25_index(Path(output_directory))
         result = search_bm25(retriever, query, chunks, k)
-        sources = chunks_to_sources(result)
+        sources = [
+        MinimalSource(
+            file_path=chunk.file_path,
+            first_character_index=chunk.first_character_index,
+            last_character_index=chunk.last_character_index,
+        )
+        for chunk in result
+        ]
 
         search_result = MinimalSearchResults(
             question_id=str(uuid.uuid4()),
             question=query,
             retrieved_sources=sources,
         )
-        student_results = StudentSearchResults(search_results=[search_result], k=k)
+        student_results = StudentSearchResults(
+            search_results=[search_result], k=k
+            )
         print(student_results.model_dump_json(indent=4))
 
-    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
-        print(f"Error: {exc}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Search failed: {exc}")
 
 
 def search_dataset(
-    dataset_path: str = "data/datasets/UnansweredQuestions/dataset_code_public.json",
+    dataset_path: str =
+    "data/datasets/UnansweredQuestions/dataset_code_public.json",
     k: int = 5,
     save_directory: str = "data/output/search_results/UnansweredQuestions",
     output_directory: str = "data/processed/bm25",
 ) -> None:
-    """Run search over a whole dataset and write a StudentSearchResults file."""
+    """Run search over a whole dataset and write a StudentSearchResults file"""
     try:
         if k <= 0:
             print("Error: k must be greater than 0.")
@@ -112,13 +114,15 @@ def search_dataset(
             print(f"Error: dataset not found: {path}")
             return
 
-        with path.open("r", encoding="utf-8") as file:
+        with path.open("r") as file:
             data = json.load(file)
 
         retriever, chunks = load_bm25_index(Path(output_directory))
 
         search_results = []
-        for item in tqdm(data.get("rag_questions", []), desc="Searching dataset"):
+        for item in tqdm(
+            data.get("rag_questions", []), desc="Searching dataset"
+                ):
             question_id = item.get("question_id", str(uuid.uuid4()))
             question = item["question"]
 
@@ -131,13 +135,15 @@ def search_dataset(
                 )
             )
 
-        student_results = StudentSearchResults(search_results=search_results, k=k)
+        student_results = StudentSearchResults(
+            search_results=search_results, k=k
+            )
 
         output_dir = Path(save_directory)
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / path.name
 
-        with output_file.open("w", encoding="utf-8") as file:
+        with output_file.open("w") as file:
             file.write(student_results.model_dump_json(indent=4))
 
         print(f"Saved student_search_results to {output_file}")
@@ -181,7 +187,7 @@ def answer(
 
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"Answer generation failed: {exc}")
 
 
@@ -197,7 +203,7 @@ def answer_dataset(
             print(f"Error: search results not found: {input_path}")
             return
 
-        with input_path.open("r", encoding="utf-8") as file:
+        with input_path.open("r") as file:
             data = json.load(file)
 
         _, chunks = load_bm25_index(Path(output_directory))
@@ -206,7 +212,8 @@ def answer_dataset(
         answers = []
         for question in tqdm(data.get("search_results", []), desc="Answering"):
             retrieved_sources = [
-                MinimalSource(**source) for source in question["retrieved_sources"]
+                MinimalSource(**source)
+                for source in question["retrieved_sources"]
             ]
             context_chunks = [
                 chunk
@@ -214,7 +221,9 @@ def answer_dataset(
                 if (chunk := find_matching_chunk(lookup, source)) is not None
             ]
 
-            generated_answer = generate_answer(question["question"], context_chunks)
+            generated_answer = generate_answer(
+                question["question"], context_chunks
+                )
 
             answers.append(
                 MinimalAnswer(
@@ -233,7 +242,7 @@ def answer_dataset(
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / input_path.name
 
-        with output_file.open("w", encoding="utf-8") as file:
+        with output_file.open("w") as file:
             file.write(student_results.model_dump_json(indent=4))
 
         print(f"Saved student_search_results_and_answer to {output_file}")
@@ -256,8 +265,6 @@ def evaluate(
     try:
         score = compute_recall(student_search_results_path, dataset_path)
         print(f"Recall: {score}")
-    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError) as exc:
-        print(f"Error: {exc}")
     except Exception as exc:
         print(f"Evaluation failed: {exc}")
 

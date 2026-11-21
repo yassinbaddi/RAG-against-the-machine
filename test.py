@@ -1,16 +1,10 @@
-import ast
 
-code = """\
-x = 10
 
-def calculate(a, b):
-    result = a + b
-    return result
-"""
 
-tree = ast.parse(code)
+class Any_class:
+    def __init__(self, name):
+        self.name = name
 
-for node in ast.walk(tree):
-    if isinstance(node, ast.Name):
-        source = ast.get_source_segment(code, node)
-        print(source)
+    def func1(self):
+        def func2():
+            return self

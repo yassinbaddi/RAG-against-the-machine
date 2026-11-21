@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .models import AnsweredQuestion, MinimalSearchResults, MinimalSource
+from models import AnsweredQuestion, MinimalSearchResults, MinimalSource
 
 IOU_THRESHOLD = 0.05
 
@@ -31,7 +31,7 @@ def load_answered_questions(dataset_path: Path) -> list[AnsweredQuestion]:
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
 
-    with dataset_path.open("r", encoding="utf-8") as file:
+    with dataset_path.open("r") as file:
         data = json.load(file)
 
     return [
@@ -50,7 +50,7 @@ def load_search_results(path: Path) -> list[MinimalSearchResults]:
     if not path.exists():
         raise FileNotFoundError(f"Search results not found: {path}")
 
-    with path.open("r", encoding="utf-8") as file:
+    with path.open("r") as file:
         data = json.load(file)
 
     return [
